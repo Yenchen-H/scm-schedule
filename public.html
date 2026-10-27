@@ -328,6 +328,21 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .placed-badge{right:86px;top:10px;font-size:11px;font-weight:700}
 .course-note{margin-top:6px;margin-bottom:0;font-size:11px;color:var(--text2)}
 .cc-teacher{font-size:11.5px;font-weight:600;opacity:1}
+/* UX — 網頁內建確認視窗、工具列選單 */
+.ui-dlg-ov{position:fixed;inset:0;z-index:10000;background:rgba(38,50,56,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+.ui-dlg{background:#FFFFFF;border-radius:12px;padding:22px 24px 18px;max-width:460px;width:100%;box-shadow:0 18px 50px rgba(38,50,56,.3)}
+.ui-dlg-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px}
+.ui-dlg-msg{white-space:pre-line;font-size:14px;line-height:1.75;color:var(--text);margin-bottom:18px}
+.ui-dlg-btns{display:flex;justify-content:flex-end;gap:8px}
+.ui-dlg-btns .btn{padding:7px 16px;font-size:13px}
+.ui-dlg-btns .btn.danger{background:#B63D40;border-color:#B63D40;color:#FFFFFF}
+.tb-menu{position:relative;display:inline-block}
+.tb-menu-list{display:none;position:absolute;top:calc(100% + 4px);left:0;background:#FFFFFF;border:1px solid var(--border2);border-radius:8px;padding:6px;z-index:2000;min-width:180px;box-shadow:0 8px 24px rgba(38,50,56,.15);flex-direction:column;gap:4px}
+.tb-menu.open .tb-menu-list{display:flex}
+.tb-menu-list .btn{width:100%;text-align:left;background:#FFFFFF}
+.tb-menu-list .btn:hover{background:var(--surface2)}
+.tb-menu-sep{height:1px;background:var(--border);margin:3px 2px}
+#cloud-logout{margin-left:10px;padding:3px 10px;font-size:11px}
 </style>
 
 <style>
@@ -912,6 +927,27 @@ const rmap = () => Object.fromEntries(ROOMS.map(r=>[r.id,r]));
 
 function getTName(tid){ return tmap[tid]?.name||tid; }
 function getClassCc(type){ return {day:'cc-day',eve:'cc-eve',grad:'cc-grad',prof:'cc-prof'}[type]||'cc-custom'; }
+// 網頁內建確認／提示視窗（取代瀏覽器原生 confirm / alert）
+function uiDialog(msg,{ok='確定',cancel='取消',danger=false,title=''}={}){
+  return new Promise(resolve=>{
+    const ov=document.createElement('div'); ov.className='ui-dlg-ov';
+    ov.innerHTML=`<div class="ui-dlg" role="dialog" aria-modal="true">${title?'<div class="ui-dlg-title"></div>':''}<div class="ui-dlg-msg"></div><div class="ui-dlg-btns">${cancel!==null?'<button class="btn ui-dlg-cancel"></button>':''}<button class="btn ${danger?'danger':'primary'} ui-dlg-ok"></button></div></div>`;
+    if(title) ov.querySelector('.ui-dlg-title').textContent=title;
+    ov.querySelector('.ui-dlg-msg').textContent=String(msg);
+    ov.querySelector('.ui-dlg-ok').textContent=ok;
+    const cb=ov.querySelector('.ui-dlg-cancel'); if(cb) cb.textContent=cancel;
+    const done=v=>{ document.removeEventListener('keydown',key,true); ov.remove(); resolve(v); };
+    const key=e=>{ if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); done(false); } else if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); done(true); } };
+    ov.querySelector('.ui-dlg-ok').onclick=()=>done(true);
+    if(cb) cb.onclick=()=>done(false);
+    ov.addEventListener('mousedown',e=>{ if(e.target===ov && cancel!==null) done(false); });
+    document.addEventListener('keydown',key,true);
+    document.body.appendChild(ov);
+    (cb||ov.querySelector('.ui-dlg-ok')).focus();
+  });
+}
+function uiConfirm(msg,opt={}){ return uiDialog(msg,{danger:/清除|刪除|覆蓋|取代|重設/.test(msg),...opt}); }
+function uiAlert(msg){ return uiDialog(msg,{cancel:null}); }
 function xe(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 // 需要排入課表的課程（排除實習、論文等 noSlot）
 function slotCourses(){ return COURSES.filter(c=>!c.noSlot); }
@@ -1671,7 +1707,7 @@ function applyData(data){
   if(!ROOMS.find(r=>r.id===selectedRoomId)) selectedRoomId=ROOMS[0]?.id||null;
 }
 let saveFailed=false;
-let previousSnapshot=null;
+let undoStack=[];
 let currentSnapshot=null;
 let historySuspended=false;
 function dataSnapshot(){
@@ -1679,18 +1715,18 @@ function dataSnapshot(){
   return JSON.stringify(d);
 }
 function undoScheduleChange(){
-  if(!previousSnapshot) return;
-  const target=previousSnapshot;
-  previousSnapshot=null;
+  if(!undoStack.length) return;
+  const target=undoStack.pop();
   historySuspended=true;
   try { applyData(JSON.parse(target)); render(); showToast('✓ 已復原上一次資料變更'); }
-  finally { historySuspended=false; document.getElementById('undo-btn').disabled=true; }
+  finally { historySuspended=false; updateUndoBtn(); }
 }
 function resetUndoHistory(){
-  previousSnapshot=null;
+  undoStack=[];
   currentSnapshot=dataSnapshot();
-  const btn=document.getElementById('undo-btn'); if(btn) btn.disabled=true;
+  updateUndoBtn();
 }
+function updateUndoBtn(){ const btn=document.getElementById('undo-btn'); if(!btn) return; btn.disabled=!undoStack.length; btn.textContent=undoStack.length?`↶ 復原 (${undoStack.length})`:'↶ 復原'; btn.title=undoStack.length?`可再復原 ${undoStack.length} 步（最多保留 30 步）`:'沒有可復原的變更'; }
 function saveLocal(){}
 function setSaveInd(txt){
   const el=document.getElementById('save-ind'); if(!el) return;
@@ -1704,8 +1740,8 @@ function loadLocal(){
     applyData(data); return true;
   }catch(e){ return false; }
 }
-function resetToDefault(){
-  if(!confirm(`確定重設？\n將清除瀏覽器中 ${SEMESTER.code} 的自動儲存，回到開課計畫的預設課程，已排的課表也會清空。\n（建議先按「匯出備份」）`)) return;
+async function resetToDefault(){
+  if(!await uiConfirm(`確定重設？\n將清除瀏覽器中 ${SEMESTER.code} 的自動儲存，回到開課計畫的預設課程，已排的課表也會清空。\n（建議先按「匯出備份」）`)) return;
   try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
   applyData({...JSON.parse(JSON.stringify(DEFAULT_DATA)), schedule:{}});
   resetUndoHistory(); render(); showToast('已重設為開課計畫預設資料');
@@ -1911,10 +1947,10 @@ function updateRoom(rid,field,value){
   showToast(`已更新教室「${room.name}」`);
 }
 
-function deleteRoom(rid){
+async function deleteRoom(rid){
   const room=ROOMS.find(r=>r.id===rid); if(!room) return;
   const used=getRoomUsedSlots(rid);
-  if(used>0&&!confirm(`教室「${room.name}」已有 ${used} 節排課，刪除後排課記錄中的教室指定將被清除，確定嗎？`)) return;
+  if(used>0&&!await uiConfirm(`教室「${room.name}」已有 ${used} 節排課，刪除後排課記錄中的教室指定將被清除，確定嗎？`)) return;
   // Clear room from schedule entries
   for(const cls of CLASSES) for(const e of schedule[cls.id]) if(e.roomId===rid) e.roomId=null;
   const idx=ROOMS.findIndex(r=>r.id===rid); if(idx>=0) ROOMS.splice(idx,1);
@@ -2171,12 +2207,12 @@ document.addEventListener('click', e=>{
 });
 
 // 統一刪除函式：從課程列表永久刪除（含已排的 schedule）
-function deleteCourse(courseId){
+async function deleteCourse(courseId){
   const cm=comap(); const co=cm[courseId];
   if(!co) return;
   const placed=isPlaced(courseId);
   const msg=`確定要從課程列表刪除「${co.name}」嗎？${placed?'（此課程已排入課表，將一併移除）':''}`;
-  if(!confirm(msg)) return;
+  if(!await uiConfirm(msg)) return;
   if(placed) removeCourse(courseId);        // 先清 schedule
   COURSES=COURSES.filter(c=>c.id!==courseId); // 再從課程列表移除
   render(); detectConflicts();
@@ -2264,11 +2300,11 @@ function updateTeacher(tid, field, value){
   showToast(`已更新「${t.name}」`);
 }
 
-function deleteTeacher(tid){
+async function deleteTeacher(tid){
   const t=tmap[tid]; if(!t) return;
   const usedIn=COURSES.filter(co=>co.teachers.includes(tid));
   if(usedIn.length>0){
-    if(!confirm(`「${t.name}」尚有 ${usedIn.length} 門課程指派，確定刪除並移除指派？`)) return;
+    if(!await uiConfirm(`「${t.name}」尚有 ${usedIn.length} 門課程指派，確定刪除並移除指派？`)) return;
     COURSES.forEach(co=>{ co.teachers=co.teachers.filter(id=>id!==tid); });
   }
   const idx=TEACHERS.findIndex(t=>t.id===tid);
@@ -2360,13 +2396,13 @@ function updateClass(cid, field, value){
   showToast(`已更新「${cls.name}」`);
 }
 
-function deleteClass(cid){
+async function deleteClass(cid){
   const cls=cmap[cid]; if(!cls) return;
   const courseCount=COURSES.filter(c=>c.classId===cid).length;
   const msg=courseCount>0
     ?`確定刪除「${cls.name}」？此班 ${courseCount} 門課程及所有排課紀錄將一併刪除。`
     :`確定刪除「${cls.name}」？`;
-  if(!confirm(msg)) return;
+  if(!await uiConfirm(msg)) return;
   // Remove all courses and schedule entries for this class
   COURSES=COURSES.filter(c=>c.classId!==cid);
   delete schedule[cid];
@@ -2397,14 +2433,14 @@ function exportBackup(){
 function importBackup(event){
   const file=event.target.files[0]; if(!file) return;
   const reader=new FileReader();
-  reader.onload=(e)=>{
+  reader.onload=async(e)=>{
     try{
       const data=JSON.parse(e.target.result);
       if(!data.teachers||!data.classes||!data.courses||!data.schedule)
         throw new Error('格式不符');
       const semWarn=data.semester&&data.semester!==SEMESTER.code
         ?`\n\n⚠ 注意：這是 ${data.semester} 的備份，目前系統是 ${SEMESTER.code}。`:'';
-      if(!confirm(`確定載入備份「${file.name}」？目前的排課資料將全部被覆蓋。${semWarn}`)){
+      if(!await uiConfirm(`確定載入備份「${file.name}」？目前的排課資料將全部被覆蓋。${semWarn}`)){
         event.target.value=''; return;
       }
       applyData(data);
@@ -2434,7 +2470,7 @@ async function importPlan(event){
     const plan=parsePlanRows(rows);
     if(!plan.courses.length) throw new Error('找不到課程資料，請確認表格有「課程名稱」「學分」欄位');
     const nClass=new Set(plan.courses.map(c=>c.className)).size;
-    if(!confirm(`從「${file.name}」讀到 ${nClass} 個班級、${plan.courses.length} 門課程。\n\n匯入後會「取代」目前所有課程與班級，已排的課表會清空（教師、教室名單保留）。\n建議先按「匯出備份」。確定匯入？`)) return;
+    if(!await uiConfirm(`從「${file.name}」讀到 ${nClass} 個班級、${plan.courses.length} 門課程。\n\n匯入後會「取代」目前所有課程與班級，已排的課表會清空（教師、教室名單保留）。\n建議先按「匯出備份」。確定匯入？`)) return;
     applyPlan(plan);
   }catch(err){
     console.error(err);
@@ -2571,7 +2607,8 @@ function applyPlan(plan){
 // ══════════════════════════════════════════
 //  AUTO ARRANGE
 // ══════════════════════════════════════════
-function autoArrange(){
+async function autoArrange(){
+  if(!await uiConfirm('自動排課會把所有班級「尚未排入」的課程，自動放進沒有衝堂的空檔（不指定教室）。\n已經排好的課程不會被移動；排完不滿意，可按「↶ 復原」一次取消整批。',{ok:'開始自動排課',danger:false})) return;
   let placed=0, failed=[];
   for(const cls of CLASSES){
     const courses=COURSES.filter(c=>c.classId===cls.id&&!c.noSlot&&!isPlaced(c.id));
@@ -2597,8 +2634,8 @@ function autoArrange(){
   showToast(`⚡ 自動排入 ${placed} 門課（草稿，未指定教室）${failed.length?`，${failed.length} 門排不進`:''}，衝堂 ${conflicts.length} 筆`);
 }
 
-function clearAll(){
-  if(!confirm('確定清除所有排課？')) return;
+async function clearAll(){
+  if(!await uiConfirm('確定清除「所有班級」的排課？\n課程清單會保留，只清空課表格子。\n清除後若反悔，可按「↶ 復原」救回。',{ok:'清除全部排課',danger:true})) return;
   CLASSES.forEach(c=>{ schedule[c.id]=[]; });
   render(); showToast('已清除');
 }
@@ -2649,6 +2686,27 @@ document.getElementById('header-sub').textContent=`${SEMESTER.year}學年度 第
   window.__uiZoom=()=>z; apply();
 })();
 moveTip=function(e){ const t=document.getElementById('tip'), z=window.__uiZoom?window.__uiZoom():1; t.style.left=(e.clientX/z+12)+'px'; t.style.top=(e.clientY/z-10)+'px'; };
+// 工具列分組：常用的留在外面，其餘收進「資料」「管理」選單；登出移到右上角
+(function(){ if(document.getElementById('pub-meta')) return;
+  const tb=document.querySelector('.toolbar'); if(!tb) return;
+  const q=s=>tb.querySelector(`button[onclick="${s}"]`);
+  const mk=(label,items)=>{ const w=document.createElement('div'); w.className='tb-menu';
+    const b=document.createElement('button'); b.className='btn'; b.type='button'; b.textContent=label+' ▾';
+    const l=document.createElement('div'); l.className='tb-menu-list';
+    items.forEach(it=>{ if(it==='sep'){ const s=document.createElement('div'); s.className='tb-menu-sep'; l.appendChild(s); } else if(it){ l.appendChild(it); it.addEventListener('click',()=>w.classList.remove('open')); } });
+    b.onclick=e=>{ e.stopPropagation(); document.querySelectorAll('.tb-menu.open').forEach(m=>{ if(m!==w) m.classList.remove('open'); }); w.classList.toggle('open'); };
+    w.append(b,l); return w; };
+  const clear=q('clearAll()');
+  const dataMenu=mk('📁 資料',[q('exportBackup()'), q("document.getElementById('import-file').click()"), q("document.getElementById('import-plan').click()"), 'sep', clear]);
+  const mgrMenu=mk('⚙ 管理',[q('openTeacherMgr()'), q('openClassMgr()'), q('openRoomMgr()')]);
+  const word=document.getElementById('export-word-wrap');
+  word.before(dataMenu, mgrMenu);
+  const auto=q('autoArrange()'), pub=document.getElementById('cloud-publish'), st=document.getElementById('cloud-status'), undo=document.getElementById('undo-btn');
+  tb.prepend(auto, pub, st, undo);
+  const out=document.getElementById('cloud-logout'), pill=document.getElementById('status-pill');
+  if(out && pill) pill.after(out);
+  document.addEventListener('click',()=>document.querySelectorAll('.tb-menu.open').forEach(m=>m.classList.remove('open')));
+})();
 const restored=false;
 resetUndoHistory();
 render();
