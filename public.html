@@ -328,6 +328,8 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .placed-badge{right:86px;top:10px;font-size:11px;font-weight:700}
 .course-note{margin-top:6px;margin-bottom:0;font-size:11px;color:var(--text2)}
 .cc-teacher{font-size:11.5px;font-weight:600;opacity:1}
+.slot-block.empty.off{background:repeating-linear-gradient(135deg,#F5F7F7 0 6px,#ECEFF0 6px 12px)!important;border-style:dashed;cursor:not-allowed}
+.slot-block.empty.off:hover{border-color:#D5DDE0}
 /* UX — 網頁內建確認視窗、工具列選單 */
 .ui-dlg-ov{position:fixed;inset:0;z-index:10000;background:rgba(38,50,56,.45);display:flex;align-items:center;justify-content:center;padding:16px}
 .ui-dlg{background:#FFFFFF;border-radius:12px;padding:22px 24px 18px;max-width:460px;width:100%;box-shadow:0 18px 50px rgba(38,50,56,.3)}
@@ -968,7 +970,7 @@ function teacherBusy(courseId, day, span){
 // ── Period helpers ──
 function getPeriodsConfig(cls){
   if(cls.type==='day')  return DAY_PERIODS;
-  if(cls.type==='eve')  return EVE_PERIODS;
+  if(cls.type==='eve')  return DAY_PERIODS;   // 顯示 1–D 節；平日 1–9 節會標示為不可排
   if(cls.type==='grad') return DAY_PERIODS;   // 碩一：第1-9節（含午休分隔），週一–週五
   return GRAD_PERIODS;                        // 碩專一：第1-13節，週一–週六
 }
@@ -979,7 +981,14 @@ function getRealPeriods(cls){
   return GRAD_REAL;                           // 碩專一：1-13
 }
 
-function getSpan(cls, startP, n){
+function getSpan(cls, startP, n, day){
+  // 進修部週六：第1–D節（午休前後不可跨），平日維持 A–D 節
+  if(cls.type==='eve' && day===6){
+    const grp=DAY_MORNING.includes(startP)?DAY_MORNING:DAY_AFTERNOON;
+    const i=grp.indexOf(startP);
+    if(i<0||i+n>grp.length) return null;
+    return grp.slice(i,i+n);
+  }
   if(cls.type==='day'||cls.type==='grad'){
     // 日間部、碩一：第1-9節，跨午休限制
     const inM = DAY_MORNING.includes(startP);
@@ -1070,7 +1079,7 @@ function placeCourse(courseId, classId, day, startP){
   if(isPlaced(courseId)){ showToast('⚠ 課程已排入'); return false; }
   const cls=cmap[classId];
   if(!getClassDays(cls).includes(day)){ showToast('⚠ 此班級該天不排課'); return false; }
-  const span=getSpan(cls,startP,co.credits);
+  const span=getSpan(cls,startP,co.credits,day);
   if(!span){ showToast(`⚠ 此格無法容納 ${co.credits} 節連排（超出範圍或跨越午休）`); return false; }
   if(!isSpanFree(classId,day,span)){ showToast('⚠ 該時段已有課程'); return false; }
   // Store pending and open room picker
@@ -1138,7 +1147,7 @@ function moveEntry(courseId, newDay, newStartP){
   }
 
   // 計算新 span
-  const newSpan=getSpan(cls, newStartP, co.credits);
+  const newSpan=getSpan(cls, newStartP, co.credits, newDay);
   if(!newSpan){
     showToast(`⚠ 此格無法容納 ${co.credits} 節連排（跨午休或超出範圍）`);
     return;
@@ -1317,7 +1326,7 @@ function buildTimetable(periods, days, dayLabels, classId_or_null, teacherId_or_
 
   const rendered=new Set();
   // day/grad 和 prof 的 PERIODS 都沒有 noon 列，需手動插入視覺午休分隔
-  const isGradClass = classId_or_null && ['day','grad','prof'].includes(cmap[classId_or_null]?.type);
+  const isGradClass = classId_or_null && ['day','grad','prof','eve'].includes(cmap[classId_or_null]?.type);
 
   for(const period of periods){
     // Insert noon gap row before period 5 for grad/prof (no noon period in GRAD_PERIODS)
@@ -1418,6 +1427,12 @@ function buildTimetable(periods, days, dayLabels, classId_or_null, teacherId_or_
         block.appendChild(card);
         cell.appendChild(block);
       } else if(!entry){
+        if(!isTeacherView && cmap[classId_or_null]?.type==='eve' && day!==6 && !EVE_REAL.includes(period.id)){
+          // 進修部平日只排 A–D 節
+          const off=document.createElement('div');
+          off.className='slot-block empty off'; off.style.height=`${ROW_H}px`; off.title='進修部平日只排 A–D 節';
+          cell.appendChild(off); row.appendChild(cell); continue;
+        }
         if(!isTeacherView){
           // 班級課表：一般拖放排課
           const block=document.createElement('div');
@@ -1430,7 +1445,7 @@ function buildTimetable(periods, days, dayLabels, classId_or_null, teacherId_or_
             if(dragCourseId){
               const co=cm[dragCourseId];
               const cls=cmap[classId_or_null];
-              const span=getSpan(cls,period.id,co?.credits||1);
+              const span=getSpan(cls,period.id,co?.credits||1,day);
               // 預覽：老師該時段已有課 → 紅色
               if(span){
                 const bad=teacherBusy(dragCourseId,day,span);
@@ -1549,7 +1564,7 @@ function renderClassGrid(){
   const days=getClassDays(cls);
   const sectionLabel={
     day: '日間部（第1–13節，週一–週五）',
-    eve: '進修部（第A–D節，週一–週六）',
+    eve: '進修部（平日第A–D節，週六第1–D節）',
     grad:'碩士班（第1–13節，週一–週五）',
     prof:'碩士在職班（第1–13節，週一–週六）',
   }[cls.type]||'';
@@ -2072,7 +2087,7 @@ function confirmCourse(){
       // 已排入：學分、班級或「不排課表」改變時，重新檢查原時段是否仍可用
       schedule[oldClassId]=schedule[oldClassId].filter(e=>e!==entry);
       const cls=cmap[newClassId];
-      const span=noSlot?null:getSpan(cls, entry.slots[0], credits);
+      const span=noSlot?null:getSpan(cls, entry.slots[0], credits, entry.day);
       const ok=span && getClassDays(cls).includes(entry.day) && isSpanFree(newClassId, entry.day, span);
       if(ok){
         entry.slots=span;
@@ -2619,8 +2634,8 @@ async function autoArrange(){
       const days=[...getClassDays(cls)].sort((a,b)=>load(a)-load(b)||a-b);
       let done=false;
       for(const day of days){
-        for(const startP of real){
-          const span=getSpan(cls,startP,co.credits); if(!span) continue;
+        for(const startP of (cls.type==='eve'&&day===6?DAY_REAL:real)){
+          const span=getSpan(cls,startP,co.credits,day); if(!span) continue;
           if(!isSpanFree(cls.id,day,span)) continue;
           if(teacherBusy(co.id,day,span)) continue;
           schedule[cls.id].push({courseId:co.id,day,slots:span,roomId:null}); placed++; done=true; break;
