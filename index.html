@@ -330,6 +330,8 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .cc-teacher{font-size:11.5px;font-weight:600;opacity:1}
 .slot-block.empty.off{background:repeating-linear-gradient(135deg,#F5F7F7 0 6px,#ECEFF0 6px 12px)!important;border-style:dashed;cursor:not-allowed}
 .slot-block.empty.off:hover{border-color:#D5DDE0}
+/* 課表往下捲時，星期列固定在上方 */
+.tt-header-row{position:sticky;top:-13px;z-index:6;background:var(--bg);padding-top:6px;padding-bottom:6px;margin-bottom:0;box-shadow:0 1px 0 var(--border),0 4px 8px -6px rgba(38,50,56,.25)}
 /* UX — 網頁內建確認視窗、工具列選單 */
 .ui-dlg-ov{position:fixed;inset:0;z-index:10000;background:rgba(38,50,56,.45);display:flex;align-items:center;justify-content:center;padding:16px}
 .ui-dlg{background:#FFFFFF;border-radius:12px;padding:22px 24px 18px;max-width:460px;width:100%;box-shadow:0 18px 50px rgba(38,50,56,.3)}
