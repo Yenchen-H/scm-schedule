@@ -315,6 +315,19 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .bottom-panel{height:125px}
 .conflict-item{font-size:12px}.stat-row{font-size:12px}.sl{color:var(--text2)}
 #export-word-wrap>.btn{background:#E0F2F1!important;border-color:#80CBC4!important;color:#00695C!important}
+/* Course card — 突顯課程名稱與授課教師 */
+.course-item{background:#FFFFFF;border:1px solid var(--border);border-left:4px solid #3F6FB5;border-radius:8px;padding:9px 10px 10px 12px!important;margin-bottom:7px;box-shadow:0 1px 2px rgba(38,50,56,.06)}
+.course-item:has(.tag-sel){border-left-color:#C9962B}
+.course-item.noslot{border-left-color:var(--border2)}
+.course-item:hover{background:#FFFFFF;border-color:var(--border2);box-shadow:0 2px 6px rgba(38,50,56,.12)}
+.course-name{font-size:14px;padding-right:78px;margin-bottom:6px}
+.course-meta{gap:6px}
+.course-teacher{flex-basis:100%;display:flex;align-items:center;margin-top:5px;font-size:13px;font-weight:600;color:var(--text)}
+.course-teacher::before{content:'授課教師';flex-shrink:0;font-size:11px;font-weight:500;color:#00695C;background:#E0F2F1;border-radius:4px;padding:1px 6px;margin-right:7px}
+.course-edit-btn,.course-del-btn{top:8px;bottom:auto;font-size:11px;background:#FFFFFF}
+.placed-badge{right:86px;top:10px;font-size:11px;font-weight:700}
+.course-note{margin-top:6px;margin-bottom:0;font-size:11px;color:var(--text2)}
+.cc-teacher{font-size:11.5px;font-weight:600;opacity:1}
 </style>
 
 <style>
