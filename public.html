@@ -333,6 +333,7 @@ body{background:var(--hb-background);color:var(--hb-text)}
     <div>
       <div class="header-title">供應鏈管理系 公開課表</div>
       <div class="header-sub" id="header-sub"></div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;"><select id="sem-select" title="切換學期" style="font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--border2);background:var(--surface);color:var(--text);" onchange="location.search='?sem='+this.value"></select><button class="btn" id="zoom-btn" onclick="cycleZoom()" title="切換字級大小" style="padding:2px 8px;font-size:11px;">字級</button></div>
     </div>
     <div style="display:flex;align-items:center;">
       <span class="pub-meta" id="pub-meta"></span><span class="save-ind" id="save-ind">尚未儲存<a onclick="resetToDefault()" title="清除自動儲存，回到開課計畫的預設資料">重設</a></span>
@@ -686,7 +687,7 @@ const TEACHERS = [
 ];
 
 // ── 學期設定（換學期時改這裡） ──
-const SEMESTER={code:'115-2', year:115, term:2};
+const SEMESTER=(()=>{ const m=(new URLSearchParams(location.search).get('sem')||'').match(/^(\d{3})-([12])$/); return m?{code:m[0],year:+m[1],term:+m[2]}:{code:'115-2', year:115, term:2}; })();
 const SEM_LABEL=`${SEMESTER.year}學年度第${SEMESTER.term}學期`;
 const STORAGE_KEY=`scm-schedule-${SEMESTER.code}`;
 
@@ -2601,6 +2602,22 @@ function showToast(msg){ const t=document.getElementById('toast'); t.textContent
 // ══════════════════════════════════════════
 document.title=`供應鏈管理系 公開課表 ${SEMESTER.code}`;
 document.getElementById('header-sub').textContent=`${SEMESTER.year}學年度 第${SEMESTER.term}學期 · SCM NKUST`;
+// 學期切換（網址加 ?sem=116-1 即可切換，資料依學期分開存放）
+(function(){ const sel=document.getElementById('sem-select'); if(!sel) return; const list=[];
+  for(let y=114;y<=Math.max(SEMESTER.year,115)+1;y++) for(const t of [1,2]) list.push(`${y}-${t}`);
+  if(!list.includes(SEMESTER.code)) list.push(SEMESTER.code);
+  sel.innerHTML=list.map(c=>`<option value="${c}" ${c===SEMESTER.code?'selected':''}>${c.replace('-','學年度 第')}學期</option>`).join('');
+  if(SEMESTER.code!=='115-2') document.querySelectorAll('a[href="public.html"]').forEach(a=>a.href='public.html?sem='+SEMESTER.code);
+})();
+// 字級：100% / 115% / 130%，記在這台電腦
+(function(){ const KEY='scm-ui-zoom', opts=[1,1.15,1.3]; let z=1.15;
+  try{ const s=parseFloat(localStorage.getItem(KEY)); if(opts.includes(s)) z=s; }catch(e){}
+  function apply(){ document.body.style.zoom=z; const h=`calc(100vh / ${z})`; document.body.style.height=h; const app=document.querySelector('.app'); if(app) app.style.height=h;
+    const b=document.getElementById('zoom-btn'); if(b) b.textContent='字級 '+Math.round(z*100)+'%'; }
+  window.cycleZoom=function(){ z=opts[(opts.indexOf(z)+1)%opts.length]; try{ localStorage.setItem(KEY,z); }catch(e){} apply(); };
+  window.__uiZoom=()=>z; apply();
+})();
+moveTip=function(e){ const t=document.getElementById('tip'), z=window.__uiZoom?window.__uiZoom():1; t.style.left=(e.clientX/z+12)+'px'; t.style.top=(e.clientY/z-10)+'px'; };
 const restored=false;
 resetUndoHistory();
 render();
