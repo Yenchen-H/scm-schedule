@@ -341,6 +341,8 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .also-chip input{display:none}
 .also-chip.on{background:#E0F2F1;border-color:var(--accent);color:#00695C;font-weight:600}
 .also-chip.on::before{content:'✓ '}
+/* 排課偏好 */
+.pref-note{display:inline-block;margin-left:6px;font-size:11px;color:#00695C;cursor:help;white-space:nowrap}
 .cc-shared{font-size:10px;font-weight:700;color:#00695C;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 課表往下捲時，星期列固定在上方 */
 .tt-header-row{position:sticky;top:-13px;z-index:6;background:var(--bg);padding-top:6px;padding-bottom:6px;margin-bottom:0;box-shadow:0 1px 0 var(--border),0 4px 8px -6px rgba(38,50,56,.25)}
@@ -412,7 +414,7 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
     <button class="btn primary" onclick="cloudPublish()" id="cloud-publish" style="display:none">📢 發布公開課表</button>
     <span id="cloud-status" role="status" style="font-size:12px;color:var(--text2)">雲端尚未設定</span>
     <button class="btn" id="undo-btn" onclick="undoScheduleChange()" title="復原上一次資料變更" disabled>↶ 復原</button>
-    <button class="btn primary" onclick="autoArrange()">⚡ 自動排課</button>
+    <button class="btn primary" onclick="autoArrange()" title="依老師偏好與校定時段，自動排入所有未排課程">⚡ 一鍵排課</button>
     <button class="btn danger" onclick="clearAll()">✕ 清除全部</button>
     <button class="btn" onclick="openTeacherMgr()">👤 管理教師</button>
     <button class="btn" onclick="openClassMgr()">🏫 管理班級</button>
@@ -422,6 +424,8 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
     <input type="file" id="import-file" accept=".json" onchange="importBackup(event)" style="display:none;">
     <button class="btn" onclick="document.getElementById('import-plan').click()" title="匯入系辦的開課計畫（Word .docx）或 Excel/CSV 開課表">📥 匯入開課表</button>
     <input type="file" id="import-plan" accept=".docx,.xlsx,.xls,.csv" onchange="importPlan(event)" style="display:none;">
+    <button class="btn" onclick="document.getElementById('import-pref').click()" title="一次選多份老師回填的排課偏好調查 Word 檔">📋 匯入偏好調查</button>
+    <input type="file" id="import-pref" accept=".docx" multiple onchange="importPrefs(event)" style="display:none;">
     <div style="position:relative;display:inline-block;" id="export-word-wrap">
       <button class="btn" onclick="toggleExportMenu()" style="background:rgba(62,207,142,.12);border-color:rgba(62,207,142,.4);color:#3ecf8e;">📄 匯出 Word</button>
       <div id="export-menu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:6px;z-index:2000;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.5);">
@@ -682,7 +686,7 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 
 <!-- ══ TEACHER MANAGER MODAL ══ -->
 <div class="modal-overlay" id="teacher-mgr-modal" style="display:none" onclick="closeTMgrOutside(event)">
-  <div class="modal" style="width:460px;max-height:88vh;display:flex;flex-direction:column;">
+  <div class="modal" style="width:640px;max-height:88vh;display:flex;flex-direction:column;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <div class="modal-title" style="margin-bottom:0;">教師名單管理</div>
       <button class="btn primary" onclick="openAddTeacher()" style="font-size:11px;padding:4px 10px;">＋ 新增教師</button>
@@ -717,7 +721,8 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
           <tr style="background:var(--surface);border-bottom:1px solid var(--border);">
             <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">姓名</th>
             <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">職別</th>
-            <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">授課班級數</th>
+            <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">排課偏好（星期順序）</th>
+            <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);">授課班級數</th>
             <th style="padding:7px 4px;"></th>
           </tr>
         </thead>
@@ -2369,6 +2374,11 @@ function renderTeacherMgrTable(){
           <option value="兼任"${t.type==='兼任'?' selected':''}>兼任</option>
         </select>
       </td>
+      <td>
+        <input class="tmgr-input" value="${prefToStr(t.pref)}" placeholder="例：一五三" title="依優先順序輸入星期，例如「一五三」＝週一最優先、其次週五、再來週三；留空＝沒有偏好"
+          onchange="setTeacherPref('${t.id}',this.value)" style="width:96px;" />
+        ${t.prefNote?`<span class="pref-note" title="${xe(t.prefNote)}">📝 備註</span>`:''}
+      </td>
       <td style="color:var(--text3);font-family:'DM Mono',monospace;font-size:11px;">${courseCount[t.id]||0} 門</td>
       <td style="text-align:right;padding-right:10px;">
         <button class="icon-btn del" title="刪除教師" onclick="deleteTeacher('${t.id}')">✕</button>
@@ -2378,6 +2388,48 @@ function renderTeacherMgrTable(){
   }
 }
 
+// ── 老師排課偏好（星期順序） ──
+const DAY_CH={1:'一',2:'二',3:'三',4:'四',5:'五',6:'六'};
+function prefToStr(p){ if(!p) return ''; return Object.entries(p).sort((a,b)=>a[1]-b[1]).map(([d])=>DAY_CH[d]).join(''); }
+function strToPref(s){ const m={'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'1':1,'2':2,'3':3,'4':4,'5':5,'6':6}; const p={}; let rk=1;
+  for(const ch of String(s||'').replace(/[\s,，>＞、星期週]/g,'')){ const d=m[ch]; if(d&&!p[d]) p[d]=rk++; } return Object.keys(p).length?p:null; }
+function setTeacherPref(tid,val){ const t=TEACHERS.find(x=>x.id===tid); if(!t) return; const p=strToPref(val);
+  if(p) t.pref=p; else delete t.pref; render(); renderTeacherMgrTable();
+  showToast(p?`已設定「${t.name}」偏好：${prefToStr(p)}`:`已清除「${t.name}」的偏好`); }
+const PREF_TEMPLATE=['排課偏好調查','老師您好','為了規劃下學期','請依照您的偏好','請於','備註','週一上午','週四晚上','因進修部學生','授課教師簽章'];
+async function importPrefs(event){
+  const files=[...event.target.files]; event.target.value=''; if(!files.length) return;
+  if(typeof JSZip==='undefined'){ uiAlert('JSZip 尚未載入，請檢查網路連線'); return; }
+  const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main', DAYS={'星期一':1,'星期二':2,'星期三':3,'星期四':4,'星期五':5,'星期六':6};
+  const ok=[], miss=[];
+  for(const f of files){
+    try{
+      const zip=await JSZip.loadAsync(f); const xml=await zip.file('word/document.xml').async('string');
+      const doc=new DOMParser().parseFromString(xml,'application/xml');
+      const txt=n=>[...n.getElementsByTagNameNS(W,'t')].map(t=>t.textContent).join('').trim();
+      const body=doc.getElementsByTagNameNS(W,'body')[0];
+      let name=''; const notes=[], raw={};
+      for(const el of body.children){
+        if(el.localName==='p'){ const s=txt(el); if(!s) continue;
+          const m=s.match(/簽章\s*[:：]\s*(.*)$/); if(m){ name=m[1].trim(); continue; }
+          if(!PREF_TEMPLATE.some(k=>s.includes(k))) notes.push(s);
+        } else if(el.localName==='tbl'){
+          for(const tr of el.getElementsByTagNameNS(W,'tr')){ const cells=[...tr.getElementsByTagNameNS(W,'tc')].map(txt);
+            const d=DAYS[(cells[0]||'').replace(/\s/g,'')]; const n=parseInt((cells[1]||'').replace(/[^\d]/g,'')); if(d&&n) raw[d]=n; }
+        }
+      }
+      if(!name) name=f.name.replace(/\.docx$/i,'').replace(/[_\-－]?\d{3}-\d\s*排課偏好調查.*/,'').replace(/^[-_－\s]+|[-_－\s]+$/g,'');
+      const ranked=Object.entries(raw).sort((a,b)=>a[1]-b[1]); const p={}; ranked.forEach(([d],i)=>p[d]=i+1);
+      const t=TEACHERS.find(x=>x.name===name)||TEACHERS.find(x=>name&&(name.includes(x.name)||x.name.includes(name)));
+      if(!t){ miss.push(`${f.name}（系統裡找不到教師「${name||'未簽名'}」）`); continue; }
+      if(!ranked.length){ miss.push(`${f.name}（${t.name} 沒有填星期順序）`); continue; }
+      t.pref=p; if(notes.length) t.prefNote=notes.join('；'); else delete t.prefNote;
+      ok.push(`${t.name}：${prefToStr(p)}${notes.length?'（有備註）':''}`);
+    }catch(err){ console.error(err); miss.push(`${f.name}（讀取失敗）`); }
+  }
+  render();
+  await uiAlert(`已匯入 ${ok.length} 位老師的排課偏好：\n${ok.join('\n')||'（無）'}${miss.length?`\n\n未匯入：\n${miss.join('\n')}`:''}\n\n可在「⚙ 管理 → 管理教師」查看或修改。`);
+}
 function updateTeacher(tid, field, value){
   value=value.trim();
   if(!value){ showToast('⚠ 不可為空白'); return; }
@@ -2698,30 +2750,58 @@ function applyPlan(plan){
 //  AUTO ARRANGE
 // ══════════════════════════════════════════
 async function autoArrange(){
-  if(!await uiConfirm('自動排課會把所有班級「尚未排入」的課程，自動放進沒有衝堂的空檔（不指定教室）。\n已經排好的課程不會被移動；排完不滿意，可按「↶ 復原」一次取消整批。',{ok:'開始自動排課',danger:false})) return;
-  let placed=0, failed=[];
-  for(const cls of CLASSES){
-    const courses=COURSES.filter(c=>c.classId===cls.id&&!c.noSlot&&!isPlaced(c.id));
-    const real=getRealPeriods(cls);
-    for(const co of courses){
-      // 優先排在該班目前課最少的那天，避免全部擠在週一
-      const load=d=>(schedule[cls.id]||[]).filter(e=>e.day===d).reduce((n,e)=>n+e.slots.length,0);
-      const days=[...getClassDays(cls)].sort((a,b)=>load(a)-load(b)||a-b);
-      let done=false;
-      for(const day of days){
-        for(const startP of (cls.type==='eve'&&day===6?DAY_REAL:real)){
-          const span=getSpan(cls,startP,co.credits,day); if(!span) continue;
-          if(spanProblem(co,day,span)) continue;
-          if(teacherBusy(co.id,day,span)) continue;
-          schedule[cls.id].push({courseId:co.id,day,slots:span,roomId:null}); placed++; done=true; break;
-        }
-        if(done) break;
-      }
-      if(!done) failed.push(`${cls.name}「${co.name}」`);
+  const hasPref=TEACHERS.some(t=>t.pref);
+  if(!await uiConfirm(`一鍵排課會把所有班級「尚未排入」的課程，自動放進沒有衝堂的空檔（不指定教室）：\n• 依老師填的星期偏好，優先排在第一志願的日子，沒勾選的日子盡量避開${hasPref?'':'（目前還沒有任何老師的偏好資料，可先到「📁 資料 → 匯入偏好調查」）'}\n• 日間部一、二年級避開週一上午、週二下午、週四下午；進修部二年級避開週四晚上\n• 進修部同一班的課盡量集中在同幾個晚上\n已排好的課程不會被移動；不滿意可按「↶ 復原」整批取消。`,{ok:'開始一鍵排課',danger:false})) return;
+  const cm=comap();
+  // 校定時段（保留給校定必修）
+  const reserved=(cls,day,span)=>{
+    if(cls.type==='day'&&(cls.grade===1||cls.grade===2)){
+      if(day===1&&span.some(s=>[1,2,3,4].includes(s))) return true;
+      if((day===2||day===4)&&span.some(s=>[5,6,7,8,9].includes(s))) return true;
     }
+    if(cls.type==='eve'&&cls.grade===2&&day===4&&span.some(s=>['A','B','C','D'].includes(s))) return true;
+    return false;
+  };
+  const startsFor=(cls,day)=>cls.type==='eve'&&day===6?DAY_REAL:getRealPeriods(cls);
+  const candidates=co=>{
+    const cls=cmap[co.classId]; const parts=[co.classId,...(co.also||[])].map(id=>cmap[id]).filter(Boolean); const out=[];
+    for(const day of getClassDays(cls)) for(const p of startsFor(cls,day)){
+      const span=getSpan(cls,p,co.credits,day); if(!span) continue;
+      if(spanProblem(co,day,span)) continue;
+      if(teacherBusy(co.id,day,span)) continue;
+      if(parts.some(c=>reserved(c,day,span))) continue;
+      out.push({day,span});
+    }
+    return out;
+  };
+  const pos=x=>DAY_REAL.indexOf(x);
+  const score=(co,{day,span})=>{
+    const cls=cmap[co.classId]; let s=0;
+    // 老師星期偏好：第1志願 0 分，第2志願 10 分…；沒勾選的日子 100 分（盡量避開）
+    for(const tid of co.teachers){ const t=tmap[tid]; if(t&&t.pref){ const rk=t.pref[day]; s+=rk?(rk-1)*10:100; } }
+    const first=pos(span[0]);
+    const load=(schedule[cls.id]||[]).filter(e=>e.day===day).reduce((n,e)=>n+e.slots.length,0);
+    if(cls.type==='eve'){ s+=load>0?-15:20; s+=first*0.5; if(day===6) s+=8; }        // 進修部：集中在已有課的晚上
+    else { s+=first>=pos('A')?60:(first>=pos(9)?25:0); s+=first*0.5; s+=load*3; } // 日間：避開晚上、各天平均
+    for(const tid of co.teachers){ let n=0; for(const c of CLASSES) for(const e of (schedule[c.id]||[])){ if(e.day===day&&cm[e.courseId]?.teachers.includes(tid)) n+=e.slots.length; } if(n>=6) s+=15; }
+    return s+day*0.1;
+  };
+  let pending=COURSES.filter(c=>!c.noSlot&&!isPlaced(c.id)&&cmap[c.classId]);
+  let placed=0, prefHit=0, prefTotal=0; const failed=[];
+  while(pending.length){
+    // 先排選擇最少（最難排）的課
+    let best=null;
+    for(const co of pending){ const cands=candidates(co); if(!best||cands.length<best.cands.length) best={co,cands}; if(!cands.length) break; }
+    pending=pending.filter(c=>c!==best.co);
+    if(!best.cands.length){ failed.push(`${cmap[best.co.classId].name}「${best.co.name}」`); continue; }
+    best.cands.sort((a,b)=>score(best.co,a)-score(best.co,b));
+    const pick=best.cands[0];
+    schedule[best.co.classId].push({courseId:best.co.id,day:pick.day,slots:pick.span,roomId:null}); placed++;
+    const tp=best.co.teachers.map(t=>tmap[t]).filter(t=>t&&t.pref);
+    if(tp.length){ prefTotal++; if(tp.every(t=>t.pref[pick.day]===1)) prefHit++; }
   }
   render();
-  showToast(`⚡ 自動排入 ${placed} 門課（草稿，未指定教室）${failed.length?`，${failed.length} 門排不進`:''}，衝堂 ${conflicts.length} 筆`);
+  await uiAlert(`一鍵排課完成：排入 ${placed} 門課（未指定教室）。\n${prefTotal?`有填偏好的課程中，${prefHit}/${prefTotal} 門排在老師的第一志願日。\n`:''}目前衝堂 ${conflicts.length} 筆。${failed.length?`\n\n以下 ${failed.length} 門找不到合適時段，請手動處理：\n${failed.join('\n')}`:''}`);
 }
 
 async function clearAll(){
@@ -2787,7 +2867,7 @@ moveTip=function(e){ const t=document.getElementById('tip'), z=window.__uiZoom?w
     b.onclick=e=>{ e.stopPropagation(); document.querySelectorAll('.tb-menu.open').forEach(m=>{ if(m!==w) m.classList.remove('open'); }); w.classList.toggle('open'); };
     w.append(b,l); return w; };
   const clear=q('clearAll()');
-  const dataMenu=mk('📁 資料',[q('exportBackup()'), q("document.getElementById('import-file').click()"), q("document.getElementById('import-plan').click()"), 'sep', clear]);
+  const dataMenu=mk('📁 資料',[q('exportBackup()'), q("document.getElementById('import-file').click()"), q("document.getElementById('import-plan').click()"), q("document.getElementById('import-pref').click()"), 'sep', clear]);
   const mgrMenu=mk('⚙ 管理',[q('openTeacherMgr()'), q('openClassMgr()'), q('openRoomMgr()')]);
   const word=document.getElementById('export-word-wrap');
   word.before(dataMenu, mgrMenu);
