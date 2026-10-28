@@ -342,6 +342,25 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .also-chip.on{background:#E0F2F1;border-color:var(--accent);color:#00695C;font-weight:600}
 .also-chip.on::before{content:'✓ '}
 /* 排課偏好 */
+.pref-btn{padding:3px 10px;font-size:11px;font-weight:500;color:var(--text2);background:#FFFFFF}
+.pref-btn.set{color:#00695C;border-color:#80CBC4;background:#E0F2F1;font-weight:600}
+.pref-dlg{max-width:620px}
+.pref-sec{font-size:13px;font-weight:700;color:var(--text);margin:12px 0 6px}
+.pref-sec span{font-weight:400;font-size:11px;color:var(--text2)}
+.pref-grid{border-collapse:collapse;width:100%;margin-bottom:4px}
+.pref-grid th{font-size:12px;font-weight:600;color:var(--text2);padding:4px;text-align:center}
+.pref-grid td{padding:3px;text-align:center}
+.pref-grid select{width:100%;padding:4px;border:1px solid var(--border2);border-radius:6px;font-size:12px;background:#FFFFFF;color:var(--text)}
+.pref-rowh{font-size:12px;font-weight:600;color:var(--text);text-align:left!important;white-space:nowrap;padding-right:8px!important}
+.pref-rowh small{display:block;font-size:10px;font-weight:400;color:var(--text3)}
+.pref-cell{display:flex;align-items:center;justify-content:center;height:34px;border:1px solid var(--border2);border-radius:6px;cursor:pointer;background:#FFFFFF;user-select:none}
+.pref-cell input{display:none}
+.pref-cell.on{background:#00897B;border-color:#00796B}
+.pref-cell.on::after{content:'✓';color:#FFFFFF;font-weight:700;font-size:14px}
+.pref-cell:hover{border-color:var(--accent)}
+.pref-tools{display:flex;gap:6px;justify-content:flex-end;margin:4px 0 8px}
+.pref-tools .btn{padding:3px 10px;font-size:11px}
+.pref-notebox{font-size:12px;color:var(--text2);background:var(--surface);border-radius:6px;padding:8px 10px;margin-bottom:12px;line-height:1.6}
 .pref-note{display:inline-block;margin-left:6px;font-size:11px;color:#00695C;cursor:help;white-space:nowrap}
 .cc-shared{font-size:10px;font-weight:700;color:#00695C;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 課表往下捲時，星期列固定在上方 */
@@ -717,7 +736,7 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
           <tr style="background:var(--surface);border-bottom:1px solid var(--border);">
             <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">姓名</th>
             <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">職別</th>
-            <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">排課偏好（星期順序）</th>
+            <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);">排課偏好（點擊設定）</th>
             <th style="padding:7px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--text3);">授課班級數</th>
             <th style="padding:7px 4px;"></th>
           </tr>
@@ -2387,8 +2406,7 @@ function renderTeacherMgrTable(){
         </select>
       </td>
       <td>
-        <input class="tmgr-input" value="${prefToStr(t.pref)}" placeholder="例：一五三" title="依優先順序輸入星期，例如「一五三」＝週一最優先、其次週五、再來週三；留空＝沒有偏好"
-          onchange="setTeacherPref('${t.id}',this.value)" style="width:96px;" />
+        <button class="btn pref-btn${t.pref||t.prefSlots?' set':''}" onclick="openPrefEditor('${t.id}')" title="點擊設定星期順序與可排時段">${prefSummary(t)}</button>
         ${t.prefNote?`<span class="pref-note" title="${xe(t.prefNote)}">📝 備註</span>`:''}
       </td>
       <td style="color:var(--text3);font-family:'DM Mono',monospace;font-size:11px;">${courseCount[t.id]||0} 門</td>
@@ -2408,6 +2426,49 @@ function strToPref(s){ const m={'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,
 function setTeacherPref(tid,val){ const t=TEACHERS.find(x=>x.id===tid); if(!t) return; const p=strToPref(val);
   if(p) t.pref=p; else delete t.pref; render(); renderTeacherMgrTable();
   showToast(p?`已設定「${t.name}」偏好：${prefToStr(p)}`:`已清除「${t.name}」的偏好`); }
+// ── 可排時段（勾選）：每天分 上午1–4、下午5–9、晚上A–D ──
+const PREF_BLOCKS=[{k:'am',label:'上午',sub:'1–4節'},{k:'pm',label:'下午',sub:'5–9節'},{k:'eve',label:'晚上',sub:'A–D節'}];
+function blockOf(p){ return [1,2,3,4].includes(p)?'am':(['A','B','C','D'].includes(p)?'eve':'pm'); }
+function blocksOf(day,span){ return [...new Set(span.map(p=>`${day}-${blockOf(p)}`))]; }
+function prefSummary(t){
+  const parts=[]; if(t.pref) parts.push('星期 '+prefToStr(t.pref)); if(t.prefSlots&&t.prefSlots.length) parts.push(`${t.prefSlots.length} 個時段`);
+  return parts.length?parts.join(' · '):'＋ 設定偏好';
+}
+function openPrefEditor(tid){
+  const t=TEACHERS.find(x=>x.id===tid); if(!t) return;
+  const days=[1,2,3,4,5,6]; const sel=new Set(t.prefSlots||[]);
+  const ov=document.createElement('div'); ov.className='ui-dlg-ov';
+  ov.innerHTML=`<div class="ui-dlg pref-dlg" role="dialog" aria-modal="true">
+    <div class="ui-dlg-title">${xe(t.name)} 的排課偏好</div>
+    <div class="pref-sec">① 星期優先順序 <span>（1＝最優先，「—」＝沒有特別偏好）</span></div>
+    <table class="pref-grid"><tr><th></th>${days.map(d=>`<th>週${DAY_CH[d]}</th>`).join('')}</tr>
+      <tr><td class="pref-rowh">順序</td>${days.map(d=>`<td><select data-day="${d}">${['—',1,2,3,4,5,6].map(v=>`<option value="${v==='—'?'':v}" ${(t.pref&&t.pref[d]==v)?'selected':''}>${v}</option>`).join('')}</select></td>`).join('')}</tr></table>
+    <div class="pref-sec">② 可排課時段 <span>（勾選老師方便的時段；全部不勾＝不限時段。沒勾的時段會盡量避開）</span></div>
+    <table class="pref-grid"><tr><th></th>${days.map(d=>`<th>週${DAY_CH[d]}</th>`).join('')}</tr>
+      ${PREF_BLOCKS.map(b=>`<tr><td class="pref-rowh">${b.label}<small>${b.sub}</small></td>${days.map(d=>{ const k=`${d}-${b.k}`; return `<td><label class="pref-cell${sel.has(k)?' on':''}"><input type="checkbox" value="${k}" ${sel.has(k)?'checked':''}></label></td>`; }).join('')}</tr>`).join('')}
+    </table>
+    <div class="pref-tools"><button class="btn" data-act="all">全選</button><button class="btn" data-act="none">全部清除</button></div>
+    ${t.prefNote?`<div class="pref-notebox">📝 調查表備註：${xe(t.prefNote)}</div>`:''}
+    <div class="ui-dlg-btns"><button class="btn ui-dlg-cancel">取消</button><button class="btn primary ui-dlg-ok">儲存</button></div>
+  </div>`;
+  const boxes=()=>[...ov.querySelectorAll('.pref-cell input')];
+  const sync=()=>boxes().forEach(i=>i.parentElement.classList.toggle('on',i.checked));
+  boxes().forEach(i=>i.onchange=sync);
+  ov.querySelector('[data-act="all"]').onclick=()=>{ boxes().forEach(i=>i.checked=true); sync(); };
+  ov.querySelector('[data-act="none"]').onclick=()=>{ boxes().forEach(i=>i.checked=false); sync(); };
+  const close=()=>ov.remove();
+  ov.querySelector('.ui-dlg-cancel').onclick=close;
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('.ui-dlg-ok').onclick=()=>{
+    const raw={}; ov.querySelectorAll('select[data-day]').forEach(s=>{ if(s.value) raw[s.dataset.day]=+s.value; });
+    const ranked=Object.entries(raw).sort((a,b)=>a[1]-b[1]); const p={}; ranked.forEach(([d],i)=>p[d]=i+1);
+    if(ranked.length) t.pref=p; else delete t.pref;
+    const slots=boxes().filter(i=>i.checked).map(i=>i.value);
+    if(slots.length&&slots.length<18) t.prefSlots=slots; else delete t.prefSlots;   // 全勾＝不限
+    close(); render(); renderTeacherMgrTable(); showToast(`✓ 已更新「${t.name}」的排課偏好`);
+  };
+  document.body.appendChild(ov);
+}
 const PREF_TEMPLATE=['排課偏好調查','老師您好','為了規劃下學期','請依照您的偏好','請於','備註','週一上午','週四晚上','因進修部學生','授課教師簽章'];
 async function importPrefs(event){
   const files=[...event.target.files]; event.target.value=''; if(!files.length) return;
@@ -2762,8 +2823,8 @@ function applyPlan(plan){
 //  AUTO ARRANGE
 // ══════════════════════════════════════════
 async function autoArrange(){
-  const hasPref=TEACHERS.some(t=>t.pref);
-  if(!await uiConfirm(`一鍵排課會把所有班級「尚未排入」的課程，自動放進沒有衝堂的空檔（不指定教室）：\n• 依老師填的星期偏好，優先排在第一志願的日子，沒勾選的日子盡量避開${hasPref?'':'（目前還沒有任何老師的偏好資料，可先到「📁 資料 → 匯入偏好調查」）'}\n• 日間部一、二年級避開週一上午、週二下午、週四下午；進修部二年級避開週四晚上\n• 進修部同一班的課盡量集中在同幾個晚上\n已排好的課程不會被移動；不滿意可按「↶ 復原」整批取消。`,{ok:'開始一鍵排課',danger:false})) return;
+  const hasPref=TEACHERS.some(t=>t.pref||t.prefSlots);
+  if(!await uiConfirm(`一鍵排課會把所有班級「尚未排入」的課程，自動放進沒有衝堂的空檔（不指定教室）：\n• 依老師的偏好：優先排在第一志願的日子與勾選的時段，其他日子／時段盡量避開${hasPref?'':'（目前還沒有任何老師的偏好資料，可先到「📁 資料 → 匯入偏好調查」）'}\n• 日間部一、二年級避開週一上午、週二下午、週四下午；進修部二年級避開週四晚上\n• 進修部同一班的課盡量集中在同幾個晚上\n已排好的課程不會被移動；不滿意可按「↶ 復原」整批取消。`,{ok:'開始一鍵排課',danger:false})) return;
   const cm=comap();
   // 校定時段（保留給校定必修）
   const reserved=(cls,day,span)=>{
@@ -2790,7 +2851,7 @@ async function autoArrange(){
   const score=(co,{day,span})=>{
     const cls=cmap[co.classId]; let s=0;
     // 老師星期偏好：第1志願 0 分，第2志願 10 分…；沒勾選的日子 100 分（盡量避開）
-    for(const tid of co.teachers){ const t=tmap[tid]; if(t&&t.pref){ const rk=t.pref[day]; s+=rk?(rk-1)*10:100; } }
+    for(const tid of co.teachers){ const t=tmap[tid]; if(t&&t.pref){ const rk=t.pref[day]; s+=rk?(rk-1)*10:100; } if(t&&t.prefSlots&&t.prefSlots.length&&!blocksOf(day,span).every(b=>t.prefSlots.includes(b))) s+=100; }
     const first=pos(span[0]);
     const load=(schedule[cls.id]||[]).filter(e=>e.day===day).reduce((n,e)=>n+e.slots.length,0);
     if(cls.type==='eve'){ s+=load>0?-15:20; s+=first*0.5; if(day===6) s+=8; }        // 進修部：集中在已有課的晚上
@@ -2799,7 +2860,7 @@ async function autoArrange(){
     return s+day*0.1;
   };
   let pending=COURSES.filter(c=>!c.noSlot&&!isPlaced(c.id)&&cmap[c.classId]);
-  let placed=0, prefHit=0, prefTotal=0; const failed=[];
+  let placed=0, prefHit=0, prefTotal=0, slotHit=0, slotTotal=0; const failed=[];
   while(pending.length){
     // 先排選擇最少（最難排）的課
     let best=null;
@@ -2811,9 +2872,11 @@ async function autoArrange(){
     schedule[best.co.classId].push({courseId:best.co.id,day:pick.day,slots:pick.span,roomId:null}); placed++;
     const tp=best.co.teachers.map(t=>tmap[t]).filter(t=>t&&t.pref);
     if(tp.length){ prefTotal++; if(tp.every(t=>t.pref[pick.day]===1)) prefHit++; }
+    const ts=best.co.teachers.map(t=>tmap[t]).filter(t=>t&&t.prefSlots&&t.prefSlots.length);
+    if(ts.length){ slotTotal++; if(ts.every(t=>blocksOf(pick.day,pick.span).every(b=>t.prefSlots.includes(b)))) slotHit++; }
   }
   render();
-  await uiAlert(`一鍵排課完成：排入 ${placed} 門課（未指定教室）。\n${prefTotal?`有填偏好的課程中，${prefHit}/${prefTotal} 門排在老師的第一志願日。\n`:''}目前衝堂 ${conflicts.length} 筆。${failed.length?`\n\n以下 ${failed.length} 門找不到合適時段，請手動處理：\n${failed.join('\n')}`:''}`);
+  await uiAlert(`一鍵排課完成：排入 ${placed} 門課（未指定教室）。\n${prefTotal?`有填偏好的課程中，${prefHit}/${prefTotal} 門排在老師的第一志願日。\n`:''}${slotTotal?`有勾選時段的課程中，${slotHit}/${slotTotal} 門排在老師勾選的時段。\n`:''}目前衝堂 ${conflicts.length} 筆。${failed.length?`\n\n以下 ${failed.length} 門找不到合適時段，請手動處理：\n${failed.join('\n')}`:''}`);
 }
 
 async function clearAll(){
