@@ -335,6 +335,13 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .course-item.placed{opacity:.5}
 .course-item.drop-before{box-shadow:0 -3px 0 0 var(--accent)!important}
 .course-item.drop-after{box-shadow:0 3px 0 0 var(--accent)!important}
+/* 合班班級 */
+.also-box{display:flex;flex-wrap:wrap;gap:6px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#FFFFFF}
+.also-chip{display:inline-flex;align-items:center;padding:4px 11px;border:1px solid var(--border2);border-radius:14px;font-size:12px;cursor:pointer;background:#FFFFFF;color:var(--text);user-select:none}
+.also-chip input{display:none}
+.also-chip.on{background:#E0F2F1;border-color:var(--accent);color:#00695C;font-weight:600}
+.also-chip.on::before{content:'✓ '}
+.cc-shared{font-size:10px;font-weight:700;color:#00695C;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 課表往下捲時，星期列固定在上方 */
 .tt-header-row{position:sticky;top:-13px;z-index:6;background:var(--bg);padding-top:6px;padding-bottom:6px;margin-bottom:0;box-shadow:0 1px 0 var(--border),0 4px 8px -6px rgba(38,50,56,.25)}
 /* UX — 網頁內建確認視窗、工具列選單 */
@@ -534,9 +541,10 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
       <div class="teacher-dropdown" id="m-teacher-dropdown"></div>
     </div>
     <div class="form-row-2">
-      <div class="form-row" style="margin-bottom:0">
-        <label class="form-label">合班代碼（選填）</label>
-        <input class="form-input" id="m-joint" placeholder="例：J1" title="不同班級填同一個代碼＝合班上課，同時段同老師不算衝堂" />
+      <div class="form-row" style="margin-bottom:0;grid-column:1/-1">
+        <label class="form-label">合班班級（選填，勾選後排課時會同時出現在這些班級的課表）</label>
+        <div id="m-also" class="also-box"></div>
+        <input type="hidden" id="m-joint" />
       </div>
       <div class="form-row" style="margin-bottom:0;display:flex;align-items:flex-end;">
         <label class="form-check"><input type="checkbox" id="m-noslot" />不排入課表（實習、論文）</label>
@@ -1050,12 +1058,36 @@ function getEntry(courseId){
   }
   return null;
 }
-function isSpanFree(classId,day,span){
-  for(const e of schedule[classId]){
-    if(e.day!==day) continue;
+// 合班：課程可設定 also=[其他班級ID]，排課時同時佔用並顯示在這些班級的課表
+function entriesForClass(cid){
+  const out=[...(schedule[cid]||[])]; const cm=comap();
+  for(const cls of CLASSES){ if(cls.id===cid) continue;
+    for(const e of (schedule[cls.id]||[])){ const co=cm[e.courseId]; if(co?.also?.includes(cid)) out.push({...e,classId:cls.id,shared:true}); } }
+  return out;
+}
+function isSpanFree(classId,day,span,ignoreCourseId){
+  for(const e of entriesForClass(classId)){
+    if(e.day!==day||e.courseId===ignoreCourseId) continue;
     for(const s of span) if(e.slots.includes(s)) return false;
   }
   return true;
+}
+// 檢查本班＋所有合班班級在該時段能否排；可以回傳空字串，否則回傳原因
+function spanProblem(co,day,span){
+  for(const cid of [co.classId,...(co.also||[])]){
+    const c=cmap[cid]; if(!c) continue; const own=cid===co.classId;
+    if(!getClassDays(c).includes(day)) return `⚠ ${own?'此班級':'合班班級「'+c.name+'」'}${DAY_LABELS[day]}不排課`;
+    const sp=getSpan(c,span[0],span.length,day);
+    if(!sp||sp.join()!==span.join()) return `⚠ ${own?'此格':'合班班級「'+c.name+'」在這個時段'}無法排課`;
+    if(!isSpanFree(cid,day,span,co.id)) return own?'⚠ 該時段已有課程':`⚠ 合班班級「${c.name}」該時段已有課程`;
+  }
+  return '';
+}
+function renderAlsoBox(ownId,selected){
+  const box=document.getElementById('m-also'); if(!box) return;
+  box.innerHTML=CLASSES.filter(c=>c.id!==ownId).map(c=>`<label class="also-chip${selected.includes(c.id)?' on':''}"><input type="checkbox" value="${c.id}" ${selected.includes(c.id)?'checked':''}>${xe(c.name)}</label>`).join('');
+  box.querySelectorAll('input').forEach(i=>i.onchange=()=>i.parentElement.classList.toggle('on',i.checked));
+  const sel=document.getElementById('m-class'); if(sel) sel.onchange=()=>renderAlsoBox(sel.value,[...box.querySelectorAll('input:checked')].map(i=>i.value));
 }
 
 // ── Room helpers ──
@@ -1089,7 +1121,7 @@ function placeCourse(courseId, classId, day, startP){
   if(!getClassDays(cls).includes(day)){ showToast('⚠ 此班級該天不排課'); return false; }
   const span=getSpan(cls,startP,co.credits,day);
   if(!span){ showToast(`⚠ 此格無法容納 ${co.credits} 節連排（超出範圍或跨越午休）`); return false; }
-  if(!isSpanFree(classId,day,span)){ showToast('⚠ 該時段已有課程'); return false; }
+  { const p=spanProblem(co,day,span); if(p){ showToast(p); return false; } }
   // Store pending and open room picker
   pendingPlace={courseId,classId,day,slots:span};
   openRoomPicker(day,span);
@@ -1167,7 +1199,7 @@ function moveEntry(courseId, newDay, newStartP){
   removeCourse(courseId);
 
   // 檢查新時段是否空閒（同班）
-  if(!isSpanFree(classId, newDay, newSpan)){
+  if(spanProblem(co, newDay, newSpan)){
     // 放回原位
     if(oldEntry) schedule[classId].push(oldEntry);
     render(); detectConflicts();
@@ -1314,7 +1346,7 @@ function buildTimetable(periods, days, dayLabels, classId_or_null, teacherId_or_
   // Build lookup: {day:{periodId: entry}}
   let slotMap={};
   if(classId_or_null){
-    for(const e of schedule[classId_or_null]){
+    for(const e of entriesForClass(classId_or_null)){
       if(!slotMap[e.day]) slotMap[e.day]={};
       for(const p of e.slots) slotMap[e.day][p]=e;
     }
@@ -1411,6 +1443,7 @@ function buildTimetable(periods, days, dayLabels, classId_or_null, teacherId_or_
         card.innerHTML=`
           <div class="cc-name">${co?.name||''}</div>
           <div class="cc-teacher">${subtitle}</div>
+          ${(()=>{ if(isTeacherView||!co) return ''; const ids=[co.classId,...(co.also||[])].filter(x=>x&&x!==classId_or_null); return ids.length?`<div class="cc-shared">合班・${ids.map(x=>xe(cmap[x]?.name||x)).join('、')}</div>`:''; })()}
           <div class="cc-credits">${co?.credits}節${co?.type?'·'+co.type:''}</div>
           ${rm?`<div class="room-badge">🚪${rm.name}</div>`:''}
           <div class="cc-remove" onclick="removeEntry('${entry.courseId}')">×</div>
@@ -1552,6 +1585,7 @@ function renderCourseList(){
         <span class="tag tag-cred">${co.credits}${co.noSlot?'學分':'節'}</span>
         ${co.noSlot?'<span class="tag tag-noslot">不排課表</span>':''}
         ${co.joint?`<span class="tag tag-joint" title="合班代碼">合班 ${xe(co.joint)}</span>`:''}
+        ${co.also?.length?`<span class="tag tag-joint" title="合班班級">合班 ${co.also.map(id=>xe(cmap[id]?.name||id)).join('、')}</span>`:''}
         <span class="course-teacher">${xe(teachers)}</span>
       </div>
       ${co.note?`<div class="course-note">${xe(co.note)}</div>`:''}
@@ -2026,6 +2060,7 @@ function _initCourseModal(){
   typeSel.selectedIndex=0;
   document.getElementById('m-teacher-search').value='';
   document.getElementById('m-joint').value='';
+  renderAlsoBox(addingToClassId||selectedClassId,[]);
   document.getElementById('m-note').value='';
   document.getElementById('m-noslot').checked=false;
   selectedTeacherTags=[];
@@ -2075,6 +2110,7 @@ function openEditModal(courseId){
   document.getElementById('m-credits').value=String(co.credits);
   document.getElementById('m-type').value=co.type;
   document.getElementById('m-joint').value=co.joint||'';
+  renderAlsoBox(co.classId,co.also||[]);
   document.getElementById('m-note').value=co.note||'';
   document.getElementById('m-noslot').checked=!!co.noSlot;
   selectedTeacherTags=(co.teachers||[]).map(tid=>({id:tid,name:getTName(tid)}));
@@ -2104,6 +2140,7 @@ function confirmCourse(){
   const type=document.getElementById('m-type').value;
   const teacherIds=selectedTeacherTags.map(t=>t.id);
   const joint=document.getElementById('m-joint').value.trim();
+  const also=[...document.querySelectorAll('#m-also input:checked')].map(i=>i.value);
   const note=document.getElementById('m-note').value.trim();
   const noSlot=document.getElementById('m-noslot').checked||credits>4;
 
@@ -2117,6 +2154,7 @@ function confirmCourse(){
     co.name=name; co.credits=credits; co.type=type; co.teachers=teacherIds;
     co.joint=joint||undefined; co.note=note||undefined; co.noSlot=noSlot||undefined;
     co.classId=newClassId;
+    co.also=also.filter(c=>c!==newClassId); if(!co.also.length) delete co.also;
 
     let unplacedMsg='';
     if(entry){
@@ -2124,7 +2162,7 @@ function confirmCourse(){
       schedule[oldClassId]=schedule[oldClassId].filter(e=>e!==entry);
       const cls=cmap[newClassId];
       const span=noSlot?null:getSpan(cls, entry.slots[0], credits, entry.day);
-      const ok=span && getClassDays(cls).includes(entry.day) && isSpanFree(newClassId, entry.day, span);
+      const ok=span && !spanProblem(co, entry.day, span);
       if(ok){
         entry.slots=span;
         (schedule[newClassId]=schedule[newClassId]||[]).push(entry);
@@ -2145,6 +2183,7 @@ function confirmCourse(){
     const co={id:newId,name,classId,credits,type,teachers:teacherIds,custom:true};
     if(joint) co.joint=joint;
     if(note) co.note=note;
+    if(also.length) co.also=also;
     if(noSlot) co.noSlot=true;
     COURSES.push(co);
     closeAddModal();
@@ -2672,7 +2711,7 @@ async function autoArrange(){
       for(const day of days){
         for(const startP of (cls.type==='eve'&&day===6?DAY_REAL:real)){
           const span=getSpan(cls,startP,co.credits,day); if(!span) continue;
-          if(!isSpanFree(cls.id,day,span)) continue;
+          if(spanProblem(co,day,span)) continue;
           if(teacherBusy(co.id,day,span)) continue;
           schedule[cls.id].push({courseId:co.id,day,slots:span,roomId:null}); placed++; done=true; break;
         }
@@ -2954,7 +2993,7 @@ async function exportWord(type){
         const usable=10906;
         const labelW=360, timeW=1000, numW=320;
         const colW=Math.floor((usable-labelW-timeW-numW)/nDays);
-        const lookup=makeSlotLookup((entry,c)=>c.id===cls.id);
+        const lookup=makeSlotLookup((entry,c)=>c.id===cls.id||(COURSES.find(x=>x.id===entry.courseId)?.also||[]).includes(cls.id));
         const ns=COURSES.filter(c=>c.classId===cls.id&&c.noSlot);
         const footer=ns.length?`※ 不排入課表：${ns.map(c=>`${c.name}(${c.credits}學分${c.teachers.length?'，'+c.teachers.map(getTName).join('、'):''})`).join('；')}`:'';
         sections.push({title:cls.name, footer, tableRows:buildRows(days,lookup,colW,labelW,timeW,numW)});
