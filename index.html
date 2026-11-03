@@ -3017,206 +3017,143 @@ const DAYS6=[1,2,3,4,5,6];
 const DLABELS={1:'週一',2:'週二',3:'週三',4:'週四',5:'週五',6:'週六'};
 
 
-// Build a timetable cell XML
-function wCell(text, {w=1500,bold=false,bg='',fs=18,valign='center'}={}){
-  const bdr='<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>';
-  const shd=bg?`<w:shd w:val="clear" w:color="auto" w:fill="${bg}"/>`:'';
-  const b=bold?'<w:b/>':'';
-  // Support newlines → multiple paragraphs
-  const lines=String(text||'').split('\n');
-  const paras=lines.map((ln,i)=>{
-    const sp=i===0?'':`<w:spacing w:before="0" w:after="0"/>`;
-    return `<w:p><w:pPr><w:jc w:val="center"/><w:rPr>${b}<w:sz w:val="${fs}"/><w:szCs w:val="${fs}"/></w:rPr></w:pPr><w:r><w:rPr>${b}<w:sz w:val="${fs}"/><w:szCs w:val="${fs}"/></w:rPr><w:t xml:space="preserve">${xe(ln)}</w:t></w:r></w:p>`;
-  }).join('');
-  return `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/><w:tcBorders>${bdr}</w:tcBorders>${shd}<w:vAlign w:val="${valign}"/></w:tcPr>${paras}</w:tc>`;
+// ── Word 匯出（格式比照系辦範例：A4 直式、標楷體＋Times New Roman、左側直式班級欄） ──
+const W_FONT='<w:rFonts w:ascii="Times New Roman" w:eastAsia="標楷體" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>';
+const W_TIME={1:['8:10','9:00'],2:['9:10','10:00'],3:['10:10','11:00'],4:['11:10','12:00'],5:['13:30','14:20'],6:['14:30','15:20'],7:['15:30','16:20'],8:['16:30','17:20'],9:['17:30','18:20'],A:['18:30','19:20'],B:['19:25','20:15'],C:['20:20','21:10'],D:['21:15','22:05']};
+const W_DAYCH={1:'一',2:'二',3:'三',4:'四',5:'五',6:'六'};
+function wRun(text,{b=false,sz=24,color='000000'}={}){
+  return `<w:r><w:rPr>${W_FONT}${b?'<w:b/>':''}<w:color w:val="${color}"/><w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${xe(text)}</w:t></w:r>`;
 }
-
-function wRow(cells, height=480){
-  return `<w:tr><w:trPr><w:trHeight w:val="${height}"/><w:cantSplit/></w:trPr>${cells}</w:tr>`;
+function wPara(text,opt={},jc='center'){
+  return `<w:p><w:pPr><w:snapToGrid w:val="0"/><w:jc w:val="${jc}"/></w:pPr>${text===''?'':wRun(text,opt)}</w:p>`;
 }
-
-// Build slot lookup: day → periodId → display info
-function makeSlotLookup(filterFn){
-  const cm={};
-  COURSES.forEach(c=>{ cm[c.id]=c; });
+// borders: {top,bottom,left,right} 值為 'single'|'thick'|'double'|'nil'
+function wBdr(side,kind){
+  if(kind==='thick') return `<w:${side} w:val="thickThinSmallGap" w:sz="12" w:space="0" w:color="auto"/>`;
+  if(kind==='double') return `<w:${side} w:val="double" w:sz="4" w:space="0" w:color="auto"/>`;
+  if(kind==='nil') return `<w:${side} w:val="nil"/>`;
+  return `<w:${side} w:val="single" w:sz="6" w:space="0" w:color="auto"/>`;
+}
+function wTc(w,paras,{bd={},span=1,vMerge='',vertical=false,vAlign='center'}={}){
+  const b=['top','left','bottom','right'].map(s=>wBdr(s,bd[s]||'single')).join('');
+  return `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${span>1?`<w:gridSpan w:val="${span}"/>`:''}${vMerge==='restart'?'<w:vMerge w:val="restart"/>':(vMerge?'<w:vMerge/>':'')}<w:tcBorders>${b}</w:tcBorders>${vertical?'<w:textDirection w:val="tbRlV"/>':''}<w:vAlign w:val="${vAlign}"/></w:tcPr>${paras||'<w:p/>'}</w:tc>`;
+}
+// 依課表內容決定要列出的節次
+function wPeriods(kind,lookup){
+  const used=p=>Object.values(lookup).some(d=>d&&d[p]);
+  const day=[1,2,3,4,5,6,7,8,9], eve=['A','B','C','D'];
+  if(kind==='eve') return [...(day.some(used)?day:[]),...eve];
+  return [...day,...(eve.some(used)||kind==='prof'?eve:[])];
+}
+// 建一張課表（回傳 <w:tbl>）
+function wTable(label,days,lookup,kind){
+  const LW=554, TW=880, NW=360, KW=603, USABLE=11906-1440;
+  const DW=Math.floor((USABLE-LW-TW-NW-KW)/days.length);
+  const periods=wPeriods(kind,lookup);
+  const groups=[periods.filter(p=>[1,2,3,4].includes(p)),periods.filter(p=>[5,6,7,8,9].includes(p)),periods.filter(p=>['A','B','C','D'].includes(p))].filter(g=>g.length);
+  const rowH=Math.max(640,Math.min(1300,Math.floor((16838-1440-1700-420)/periods.length)));
+  const grid=`<w:tblGrid>${[LW,TW,NW,KW,...days.map(()=>DW)].map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
+  let rows='';
+  // 表頭：一 二 三…
+  rows+=`<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="413"/><w:jc w:val="center"/></w:trPr>`
+    +wTc(LW,'',{bd:{bottom:'thick'}})
+    +wTc(TW+NW+KW,'',{span:3,bd:{bottom:'thick'}})
+    +days.map(d=>wTc(DW,wPara(W_DAYCH[d],{sz:24}),{bd:{bottom:'thick'}})).join('')+`</w:tr>`;
+  groups.forEach((g,gi)=>{
+    g.forEach((p,i)=>{
+      const top=i===0?(gi===0?'thick':'double'):'single';
+      const bottom=i===g.length-1&&gi<groups.length-1?'double':(i===g.length-1?'thick':'single');
+      const bd={top,bottom};
+      const lab=i===0
+        ? wTc(LW,gi===0?wPara(label,{sz:32},'both'):'',{vMerge:'restart',vertical:true,bd:{top,bottom:'single',right:'thick'}})
+        : wTc(LW,'',{vMerge:'cont',bd:{top:'single',bottom:'single',right:'thick'}});
+      const [t1,t2]=W_TIME[p];
+      let r=`<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="${rowH}"/><w:jc w:val="center"/></w:trPr>`+lab
+        +wTc(TW,wPara(t1,{sz:22})+wPara('至',{sz:22})+wPara(t2,{sz:22}),{bd:{...bd,left:'thick'}})
+        +wTc(NW,wPara(String(p)),{bd})
+        +wTc(KW,wPara('科目'),{bd});
+      for(const d of days){
+        const s=lookup[d]?.[p];
+        let paras='';
+        if(s){ const small=(s.sub||[]).length>0; paras=wPara(s.title,{b:true,sz:small?22:24}); for(const ln of (s.sub||[])) paras+=wPara(ln,{sz:18}); }
+        r+=wTc(DW,paras,{bd,vAlign:'top'});
+      }
+      rows+=r+'</w:tr>';
+    });
+  });
+  return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="40" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="40" w:type="dxa"/></w:tblCellMar></w:tblPr>${grid}${rows}</w:tbl>`;
+}
+// day → period → {title, sub[]}；每一節都顯示課名（比照範例）
+function makeSlotLookup(filterFn,subFn){
+  const cm={}; COURSES.forEach(c=>{ cm[c.id]=c; });
   const lookup={};
-  for(const cls of CLASSES){
-    for(const entry of (schedule[cls.id]||[])){
-      if(!filterFn(entry,cls)) continue;
-      const co=cm[entry.courseId]; if(!co) continue;
-      const rm=entry.roomId?ROOMS.find(r=>r.id===entry.roomId):null;
-      entry.slots.forEach((pid,i)=>{
-        if(!lookup[entry.day]) lookup[entry.day]={};
-        lookup[entry.day][pid]=i===0
-          ? {name:co.name,teachers:co.teachers.map(tid=>tmap[tid]?.name||tid).join('、'),
-             className:cls.name,roomName:rm?.name||'',span:entry.slots.length,first:true}
-          : {cont:true};
-      });
-    }
+  for(const cls of CLASSES) for(const entry of (schedule[cls.id]||[])){
+    if(!filterFn(entry,cls)) continue;
+    const co=cm[entry.courseId]; if(!co) continue;
+    const title=`${co.name}(${co.type==='必修'?'必':'選'})`;
+    const sub=subFn?subFn(co,cls,entry):[];
+    for(const pid of entry.slots){ (lookup[entry.day]=lookup[entry.day]||{})[pid]={title,sub}; }
   }
   return lookup;
 }
-
-// Build all table rows XML for one timetable
-function buildRows(days, lookup, colW, labelW, timeW, numW){
-  const rows=[];
-  // Header
-  const hdrCells=wCell('',{w:labelW,bold:true,bg:'D9D9D9'})
-    +wCell('時間',{w:timeW,bold:true,bg:'D9D9D9'})
-    +wCell('節',{w:numW,bold:true,bg:'D9D9D9'})
-    +days.map(d=>wCell(DLABELS[d]||`週${d}`,{w:colW,bold:true,bg:'D9D9D9'})).join('');
-  rows.push(wRow(hdrCells,440));
-
-  for(const pid of ALL_PIDS){
-    // Noon divider before period 5
-    if(pid===5){
-      const nCells=wCell('午休',{w:labelW,bold:true,bg:'F0F0F0',fs:16})
-        +wCell('12:00-13:30',{w:timeW,bg:'F0F0F0',fs:14})
-        +wCell('',{w:numW,bg:'F0F0F0'})
-        +days.map(()=>wCell('',{w:colW,bg:'F0F0F0'})).join('');
-      rows.push(wRow(nCells,300));
-    }
-    const pinfo=PINFO[pid];
-    const labelCells=wCell('',{w:labelW,bg:'FAFAFA'})
-      +wCell(pinfo.t,{w:timeW,bg:'FAFAFA',fs:14})
-      +wCell(String(pid),{w:numW,bold:true,bg:'F0F0F0',fs:16});
-
-    const dayCells=days.map(day=>{
-      const slot=lookup[day]?.[pid];
-      if(!slot) return wCell('',{w:colW});
-      if(slot.cont) return wCell('',{w:colW,bg:'EBF3FB'}); // continuation
-      // Build cell lines based on what view this is
-      const lines=[slot.name];
-      if(slot.teachers) lines.push(slot.teachers);
-      if(slot.roomName) lines.push('📍'+slot.roomName);
-      if(slot.className) lines.push('['+slot.className+']');
-      return wCell(lines.join('\n'),{w:colW,bg:'EBF3FB',fs:16});
-    }).join('');
-
-    rows.push(wRow(labelCells+dayCells,480));
-  }
-  return rows.join('');
-}
-
-// Generate one .docx blob from multiple sections (one per page)
+function deptLabel(cls){ return String(cls.name).replace(/^日/,'日間部').replace(/^進/,'進修部'); }
 async function makeDocx(sections){
   if(typeof JSZip==='undefined') throw new Error('JSZip 尚未載入，請稍後再試或檢查網路連線');
-
-  const PAGE_W=16838, PAGE_H=11906, MARGIN=500; // landscape A4, tight margins
-
+  const title=t=>`<w:p><w:pPr><w:snapToGrid w:val="0"/>${t.after?'<w:spacing w:after="90"/>':''}<w:jc w:val="center"/></w:pPr>${wRun(t.text,{b:true,sz:28})}</w:p>`;
   let body='';
   sections.forEach((sec,i)=>{
-    if(i>0) body+=`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
-    body+=`<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="60"/></w:pPr>
-      <w:r><w:rPr><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr>
-      <w:t>國立高雄科技大學-供應鏈管理系　${SEM_LABEL}　${xe(sec.title)}　課程表</w:t></w:r></w:p>`;
-    body+=`<w:tbl>
-      <w:tblPr>
-        <w:tblW w:w="0" w:type="auto"/>
-        <w:tblBorders>
-          <w:insideH w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>
-          <w:insideV w:val="single" w:sz="4" w:space="0" w:color="AAAAAA"/>
-        </w:tblBorders>
-        <w:tblLayout w:type="fixed"/>
-        <w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="60" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar>
-      </w:tblPr>
-      ${sec.tableRows}
-    </w:tbl>`;
-    if(sec.footer) body+=`<w:p><w:pPr><w:spacing w:before="60"/></w:pPr><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">${xe(sec.footer)}</w:t></w:r></w:p>`;
+    body+=`<w:p><w:pPr><w:snapToGrid w:val="0"/>${i>0?'<w:pageBreakBefore/>':''}<w:jc w:val="center"/></w:pPr>${wRun('國立高雄科技大學-供應鏈管理系',{b:true,sz:28})}</w:p>`;
+    body+=title({text:`${SEMESTER.year}學年度第${SEMESTER.term}學期 課程表`,after:true});
+    body+=sec.table;
+    if(sec.footer) body+=`<w:p><w:pPr><w:snapToGrid w:val="0"/><w:spacing w:before="60"/></w:pPr>${wRun(sec.footer,{sz:20})}</w:p>`;
   });
-
   const docXml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<w:body>
-${body}
-<w:sectPr>
-  <w:pgSz w:w="${PAGE_H}" w:h="${PAGE_W}" w:orient="landscape"/>
-  <w:pgMar w:top="${MARGIN}" w:right="${MARGIN}" w:bottom="${MARGIN}" w:left="${MARGIN}"/>
-</w:sectPr>
-</w:body>
-</w:document>`;
-
-  const contentTypes=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-</Types>`;
-
-  const rels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`;
-
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="851" w:footer="992" w:gutter="0"/><w:cols w:space="425"/><w:docGrid w:type="lines" w:linePitch="360"/></w:sectPr></w:body></w:document>`;
+  const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr>${W_FONT}<w:kern w:val="2"/><w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="en-US" w:eastAsia="zh-TW"/></w:rPr></w:rPrDefault><w:pPrDefault/></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="a"><w:name w:val="Normal"/><w:pPr><w:widowControl w:val="0"/></w:pPr></w:style></w:styles>`;
   const zip=new JSZip();
-  zip.file('[Content_Types].xml', contentTypes);
-  zip.file('_rels/.rels', rels);
-  zip.file('word/document.xml', docXml);
-  zip.file('word/_rels/document.xml.rels',
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>');
-
-  return zip.generateAsync({
-    type:'blob',
-    mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  });
+  zip.file('[Content_Types].xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`);
+  zip.file('_rels/.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+  zip.file('word/document.xml',docXml);
+  zip.file('word/styles.xml',styles);
+  zip.file('word/_rels/document.xml.rels',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+  return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
 }
 
 async function exportWord(type){
   document.getElementById('export-menu').style.display='none';
   showToast('正在產生 Word 檔案…');
-
   try{
     const sections=[];
-
     if(type==='class'){
       for(const cls of CLASSES){
-        // 只有論文/實習（沒有要排的課）的班級不輸出空白課表
         if(!COURSES.some(c=>c.classId===cls.id&&!c.noSlot)) continue;
         const days=(cls.type==='day'||cls.type==='grad')?DAYS5:DAYS6;
-        const nDays=days.length;
-        // landscape A4 usable width (DXA): 11906 - 2*500 = 10906
-        const usable=10906;
-        const labelW=360, timeW=1000, numW=320;
-        const colW=Math.floor((usable-labelW-timeW-numW)/nDays);
         const lookup=makeSlotLookup((entry,c)=>c.id===cls.id||(COURSES.find(x=>x.id===entry.courseId)?.also||[]).includes(cls.id));
         const ns=COURSES.filter(c=>c.classId===cls.id&&c.noSlot);
         const footer=ns.length?`※ 不排入課表：${ns.map(c=>`${c.name}(${c.credits}學分${c.teachers.length?'，'+c.teachers.map(getTName).join('、'):''})`).join('；')}`:'';
-        sections.push({title:cls.name, footer, tableRows:buildRows(days,lookup,colW,labelW,timeW,numW)});
+        sections.push({footer, table:wTable(`${deptLabel(cls)}   導師`,days,lookup,cls.type)});
       }
-      const blob=await makeDocx(sections);
-      dlBlob(blob,`SCM班級課表_${yyyymmdd()}.docx`);
-
+      dlBlob(await makeDocx(sections),`SCM班級課表_${yyyymmdd()}.docx`);
     } else if(type==='teacher'){
       for(const t of TEACHERS){
-        const lookup=makeSlotLookup((entry)=>{
-          const co=COURSES.find(c=>c.id===entry.courseId);
-          return co?.teachers.includes(t.id);
-        });
+        const lookup=makeSlotLookup(entry=>COURSES.find(c=>c.id===entry.courseId)?.teachers.includes(t.id),(co,cls,e)=>{ const rm=e.roomId?ROOMS.find(r=>r.id===e.roomId):null; return [cls.name+(rm?' '+rm.name:'')]; });
         if(!Object.keys(lookup).length) continue;
-        const usable=10906;
-        const labelW=360, timeW=1000, numW=320;
-        const colW=Math.floor((usable-labelW-timeW-numW)/6);
-        sections.push({title:`${t.name}（${t.type}）`, tableRows:buildRows(DAYS6,lookup,colW,labelW,timeW,numW)});
+        sections.push({table:wTable(`${t.name}   老師`,DAYS6,lookup,'teacher')});
       }
       if(!sections.length){ showToast('⚠ 尚無教師已排課'); return; }
-      const blob=await makeDocx(sections);
-      dlBlob(blob,`SCM教師課表_${yyyymmdd()}.docx`);
-
+      dlBlob(await makeDocx(sections),`SCM教師課表_${yyyymmdd()}.docx`);
     } else if(type==='room'){
       for(const room of ROOMS){
-        const lookup=makeSlotLookup(entry=>entry.roomId===room.id);
+        const lookup=makeSlotLookup(entry=>entry.roomId===room.id,(co,cls)=>[cls.name+' '+co.teachers.map(getTName).join('、')]);
         if(!Object.keys(lookup).length) continue;
-        const usable=10906;
-        const labelW=360, timeW=1000, numW=320;
-        const colW=Math.floor((usable-labelW-timeW-numW)/6);
-        sections.push({title:`教室 ${room.name}`, tableRows:buildRows(DAYS6,lookup,colW,labelW,timeW,numW)});
+        sections.push({table:wTable(`${room.name}   教室`,DAYS6,lookup,'room')});
       }
       if(!sections.length){ showToast('⚠ 尚無教室已排課'); return; }
-      const blob=await makeDocx(sections);
-      dlBlob(blob,`SCM教室課表_${yyyymmdd()}.docx`);
+      dlBlob(await makeDocx(sections),`SCM教室課表_${yyyymmdd()}.docx`);
     }
-
     showToast('✓ Word 檔案已下載');
   } catch(err){
     console.error('匯出失敗:', err);
