@@ -380,6 +380,21 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
 .tb-menu-list .btn:hover{background:var(--surface2)}
 .tb-menu-sep{height:1px;background:var(--border);margin:3px 2px}
 #cloud-logout{margin-left:10px;padding:3px 10px;font-size:11px}
+/* 課表整頁顯示：欄寬撐滿 */
+.grid-area{position:relative}
+.timetable-wrap{width:100%}
+.tt-day-hdr,.day-cell,.tt-teacher .tt-day-hdr,.tt-teacher .day-cell{flex:1 1 0;width:auto;min-width:var(--col-w)}
+.class-info{max-width:none}
+.cc-name{font-size:13px}.cc-teacher{font-size:12px}
+.bottom-panel.bp-min{height:38px}
+.bp-min .conflict-panel{overflow:hidden}
+.bp-min #conflict-list{display:none}
+.bp-min .stats-panel{width:auto;display:flex;gap:16px;align-items:center;padding:0 14px}
+.bp-min .stats-panel>div:first-child{display:none}
+.bp-min .stat-row{border:none;gap:6px;padding:0}
+.conflict-title{display:flex;align-items:center;gap:6px}
+.bp-toggle{margin-left:auto;font-size:11px;padding:2px 9px;border:1px solid var(--border2);border-radius:5px;background:#FFFFFF;color:var(--text2);cursor:pointer;font-family:inherit}
+.bp-toggle:hover{border-color:var(--accent);color:#00695C}
 </style>
 
 <style>
@@ -505,7 +520,7 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-r
   <!-- Bottom -->
   <div class="bottom-panel">
     <div class="conflict-panel">
-      <div class="conflict-title">衝堂偵測 <span id="conflict-count" style="color:var(--red2);"></span></div>
+      <div class="conflict-title">衝堂偵測 <span id="conflict-count" style="color:var(--red2);"></span><button class="bp-toggle" id="bp-toggle" onclick="toggleBottomPanel()" title="展開／收合下方面板">▴ 展開</button></div>
       <div id="conflict-list"></div>
     </div>
     <div class="stats-panel">
@@ -1343,7 +1358,7 @@ function getConflictCourseKeys(){
 // ══════════════════════════════════════════
 //  RENDER HELPERS
 // ══════════════════════════════════════════
-const ROW_H=44, GAP=2, NOON_H=9;
+let ROW_H=44; const GAP=2, NOON_H=9;
 
 function buildTimetable(periods, days, dayLabels, classId_or_null, teacherId_or_null){
   // Returns a DOM fragment
@@ -1791,7 +1806,23 @@ function render(){
   else renderLoadView();
   saveLocal();
   if(window.cloudQueueSave) window.cloudQueueSave();
+  fitTimetable();
 }
+// 課表整頁顯示：欄寬撐滿畫面，列高依可用高度自動調整（40–80px）
+let _fitting=false;
+function fitTimetable(){
+  if(_fitting) return; const ga=document.getElementById('grid-area'); if(!ga) return;
+  const rows=[...ga.querySelectorAll('.tt-period-row:not(.noon-row)')]; if(!rows.length) return;
+  const noon=ga.querySelectorAll('.noon-row').length*(NOON_H+GAP);
+  const avail=ga.clientHeight-rows[0].offsetTop-noon-18;
+  const h=Math.max(40,Math.min(80,Math.floor(avail/rows.length)-GAP));
+  if(Math.abs(h-ROW_H)>1){ ROW_H=h; _fitting=true; try{ const st=ga.scrollTop; if(currentView==='class') renderClassGrid(); else if(currentView==='teacher') renderTeacherGrid(); else if(currentView==='room') renderRoomGrid(); ga.scrollTop=st; } finally{ _fitting=false; } }
+}
+// 下方「衝堂偵測／排課進度」面板可收合，讓課表有更多空間（預設收合，記在這台電腦）
+function applyBottomPanel(min){ const bp=document.querySelector('.bottom-panel'); if(!bp) return; bp.classList.toggle('bp-min',min); const b=document.getElementById('bp-toggle'); if(b) b.textContent=min?'▴ 展開':'▾ 收合'; }
+function toggleBottomPanel(){ const min=!document.querySelector('.bottom-panel').classList.contains('bp-min'); try{ localStorage.setItem('scm-bp-min',min?'1':'0'); }catch(e){} applyBottomPanel(min); fitTimetable(); }
+(function(){ let min=true; try{ const v=localStorage.getItem('scm-bp-min'); if(v!==null) min=v==='1'; }catch(e){} applyBottomPanel(min); })();
+let _fitTmr; window.addEventListener('resize',()=>{ clearTimeout(_fitTmr); _fitTmr=setTimeout(fitTimetable,150); });
 
 // ══════════════════════════════════════════
 //  AUTO SAVE（瀏覽器 localStorage，依學期分開存）
